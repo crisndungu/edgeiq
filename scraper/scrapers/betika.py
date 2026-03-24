@@ -24,9 +24,10 @@ class BetikaScraper(BaseScraper):
         captured: list[dict] = []
 
         async def handle_route(route: Route, request: Request) -> None:
-            if API_HOST in request.url:
-                print(f"[betika] req: {request.url}")
-            if API_HOST not in request.url or "/prematch" not in request.url:
+            # Log all XHR/fetch requests to find actual API endpoints
+            if request.resource_type in ("xhr", "fetch"):
+                print(f"[betika] {request.resource_type}: {request.url}")
+            if API_HOST not in request.url or "/v1/uo/matches" not in request.url:
                 await route.continue_()
                 return
             try:
@@ -53,10 +54,18 @@ class BetikaScraper(BaseScraper):
             print(f"[{self.name}] Ban detected - skipping")
             return []
 
-        # Scroll to trigger lazy-loaded content
+        # Scroll to trigger lazy-loaded content and wait for API calls
         await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        await page.wait_for_timeout(3000)
+        await page.wait_for_timeout(6000)
         await page.close()
+
+        if captured:
+            import json
+            print(f"[betika] sample response keys: {list(captured[0].keys())}")
+            sample = (captured[0].get("data") or [{}])
+            if sample:
+                print(f"[betika] sample event keys: {list(sample[0].keys())}")
+                print(f"[betika] sample event: {json.dumps(sample[0], default=str)[:500]}")
 
         rows = self._parse(captured)
         print(f"[{self.name}] Got {len(rows)} odds rows")
