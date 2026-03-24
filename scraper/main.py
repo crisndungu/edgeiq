@@ -22,9 +22,22 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 def get_scrapers():
-    from scrapers.oddsportal import OddsPortalScraper
     from scrapers.betika import BetikaScraper
-    return [OddsPortalScraper(), BetikaScraper()]
+    from scrapers.sportpesa import SportPesaScraper
+    from scrapers.mozzart import MozzartScraper
+    from scrapers.oneXbet import OneXBetScraper
+    from scrapers.sportybet import SportybetScraper
+    from scrapers.betpawa import BetpawaScraper
+    from scrapers.paripesa import ParipesaScraper
+    return [
+        BetikaScraper(),
+        SportPesaScraper(),
+        MozzartScraper(),
+        OneXBetScraper(),
+        SportybetScraper(),
+        BetpawaScraper(),
+        ParipesaScraper(),
+    ]
 
 
 async def run_scraper(scraper) -> int:
@@ -32,10 +45,19 @@ async def run_scraper(scraper) -> int:
     if not rows:
         return 0
 
-    payload = [r.to_dict() for r in rows]
+    # Upsert events first (FK constraint requires event to exist before snapshot)
+    seen_events: set[str] = set()
+    events_payload = []
+    for r in rows:
+        if r.event_id not in seen_events and r.home_team and r.away_team:
+            seen_events.add(r.event_id)
+            events_payload.append(r.to_event_dict())
 
-    # Upsert events first (deduplicated by event_id)
-    # For now we insert odds snapshots directly
+    if events_payload:
+        supabase.table("events").upsert(events_payload, on_conflict="id").execute()
+        print(f"[{scraper.name}] Upserted {len(events_payload)} events")
+
+    payload = [r.to_dict() for r in rows]
     result = supabase.table("odds_snapshots").insert(payload).execute()
     inserted = len(result.data) if result.data else 0
     print(f"[{scraper.name}] Inserted {inserted} rows into odds_snapshots")

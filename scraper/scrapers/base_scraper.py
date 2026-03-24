@@ -1,9 +1,8 @@
-import asyncio
 import random
 import time
 from abc import ABC, abstractmethod
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Any, Optional
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 
@@ -30,6 +29,10 @@ class OddsRow:
         home_odds: float,
         away_odds: float,
         draw_odds: Optional[float] = None,
+        home_team: str = "",
+        away_team: str = "",
+        start_time: str = "",
+        sport: str = "Football",
     ):
         self.bookmaker = bookmaker
         self.event_id = event_id
@@ -37,9 +40,13 @@ class OddsRow:
         self.home_odds = home_odds
         self.away_odds = away_odds
         self.draw_odds = draw_odds
-        self.timestamp = datetime.utcnow().isoformat()
+        self.home_team = home_team
+        self.away_team = away_team
+        self.start_time = start_time
+        self.sport = sport
+        self.timestamp = datetime.now(timezone.utc).isoformat()
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "bookmaker": self.bookmaker,
             "event_id": self.event_id,
@@ -48,6 +55,16 @@ class OddsRow:
             "away_odds": self.away_odds,
             "draw_odds": self.draw_odds,
             "timestamp": self.timestamp,
+        }
+
+    def to_event_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.event_id,
+            "name": f"{self.home_team} vs {self.away_team}",
+            "sport": self.sport,
+            "start_time": self.start_time or datetime.now(timezone.utc).isoformat(),
+            "home_team": self.home_team,
+            "away_team": self.away_team,
         }
 
 
@@ -67,14 +84,11 @@ class BaseScraper(ABC):
 
     async def _launch(self) -> None:
         playwright = await async_playwright().start()
-        launch_args = {
-            "headless": True,
-            "args": ["--no-sandbox", "--disable-setuid-sandbox"],
-        }
-        if self.proxy:
-            launch_args["proxy"] = {"server": self.proxy}
-
-        self.browser = await playwright.chromium.launch(**launch_args)
+        self.browser = await playwright.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox"],
+            proxy={"server": self.proxy} if self.proxy else None,
+        )
         self.context = await self.browser.new_context(
             user_agent=random.choice(USER_AGENTS),
             viewport={"width": 1280, "height": 800},
@@ -94,7 +108,7 @@ class BaseScraper(ABC):
         elapsed = time.time() - BaseScraper._last_request_time
         if elapsed < REQUEST_INTERVAL:
             sleep_for = REQUEST_INTERVAL - elapsed + random.uniform(1, 5)
-            print(f"[{self.name}] Rate limiting — waiting {sleep_for:.1f}s")
+            print(f"[{self.name}] Rate limiting - waiting {sleep_for:.1f}s")
             time.sleep(sleep_for)
         BaseScraper._last_request_time = time.time()
 

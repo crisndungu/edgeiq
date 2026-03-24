@@ -56,7 +56,7 @@ All odds normalized to decimal format. Market names normalized to canonical form
 - Odds data older than 48h should be archived, not deleted
 
 ## Current Status
-Phase: A — Project Setup
-Completed: [Next.js init, shadcn init, deps installed]
-In Progress: Folder structure + env setup
-Blocked: Nothing yet
+Phase: E — Arbitrage Detection Engine
+Completed: [Phase A: Next.js init, shadcn, deps | Phase B: layout, dashboard, nav, stub pages | Phase C: schema.ts, queries.ts, supabase.ts | Phase D: Betika scraper (api.betika.com/v1/uo/matches), OddsPortal scraper (Nuxt state extraction, WIP)]
+In Progress: Phase E — arbitrage engine, ArbitrageCard, StakeCalculator, /arbitrage page wired up
+Blocked: OddsPortal API responses are base64-encrypted — DOM extraction fallback in place

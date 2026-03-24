@@ -4,6 +4,7 @@ Betika loads odds dynamically via XHR, so we capture those directly.
 """
 import json
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from playwright.async_api import Route, Request
 
@@ -21,10 +22,9 @@ class BetikaScraper(BaseScraper):
 
     async def _fetch(self) -> list[OddsRow]:
         page = await self._new_page()
-        captured: list[dict] = []
+        captured: list[dict[str, Any]] = []
 
         async def handle_route(route: Route, request: Request) -> None:
-            # Log all XHR/fetch requests to find actual API endpoints
             if request.resource_type in ("xhr", "fetch"):
                 print(f"[betika] {request.resource_type}: {request.url}")
             if API_HOST not in request.url or "/v1/uo/matches" not in request.url:
@@ -33,7 +33,7 @@ class BetikaScraper(BaseScraper):
             try:
                 response = await route.fetch()
                 try:
-                    body = await response.json()
+                    body: dict[str, Any] = await response.json()
                     captured.append(body)
                 except Exception:
                     pass
@@ -42,27 +42,19 @@ class BetikaScraper(BaseScraper):
                 await route.continue_()
 
         await page.route("**/*", handle_route)
-
         print(f"[{self.name}] Loading {BASE_URL}")
-        await page.goto(BASE_URL, wait_until="commit", timeout=30000)
-
-        # Wait for DOM to hydrate before accessing document.body
-        await page.wait_for_timeout(5000)
-
+        await page.goto(BASE_URL, wait_until="networkidle", timeout=30000)
         content = await page.content()
         if self._is_banned(content):
             print(f"[{self.name}] Ban detected - skipping")
             return []
 
-        # Scroll to trigger lazy-loaded content and wait for API calls
-        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        await page.wait_for_timeout(6000)
         await page.close()
 
         if captured:
-            import json
             print(f"[betika] sample response keys: {list(captured[0].keys())}")
-            sample = (captured[0].get("data") or [{}])
+            raw: Any = captured[0].get("data") or [{}]
+            sample: list[dict[str, Any]] = cast(list[dict[str, Any]], raw) if isinstance(raw, list) else [{}]
             if sample:
                 print(f"[betika] sample event keys: {list(sample[0].keys())}")
                 print(f"[betika] sample event: {json.dumps(sample[0], default=str)[:500]}")
@@ -71,41 +63,31 @@ class BetikaScraper(BaseScraper):
         print(f"[{self.name}] Got {len(rows)} odds rows")
         return rows
 
-    def _parse(self, captured: list[dict]) -> list[OddsRow]:
+    def _parse(self, captured: list[dict[str, Any]]) -> list[OddsRow]:
         rows: list[OddsRow] = []
 
         for body in captured:
-            data = body.get("data", [])
-            if not isinstance(data, list):
-                continue
+            raw: Any = body.get("data") or []
+            data: list[dict[str, Any]] = cast(list[dict[str, Any]], raw) if isinstance(raw, list) else []
 
             for event in data:
                 try:
-                    home = event.get("home_team", "")
-                    away = event.get("away_team", "")
-                    start_str = event.get("start_time", "")
+                    home: str = str(event.get("home_team") or "")
+                    away: str = str(event.get("away_team") or "")
+                    start_str: str = str(event.get("start_time") or "")
 
                     if not home or not away or not start_str:
                         continue
 
-                    # Betika start_time: "2024-03-25 15:00:00"
                     try:
                         dt = datetime.strptime(start_str, "%Y-%m-%d %H:%M:%S")
                         start_time = dt.replace(tzinfo=timezone.utc).isoformat()
                     except ValueError:
                         start_time = start_str
 
-                    picks = event.get("picks", [])
-                    odds_map: dict[str, float] = {}
-                    for pick in picks:
-                        special_bet_value = pick.get("special_bet_value", "")
-                        odd_value = pick.get("odd_value", 0)
-                        if special_bet_value and odd_value:
-                            odds_map[str(special_bet_value).strip()] = float(odd_value)
-
-                    home_odds = normalize(odds_map.get("1", 0))
-                    draw_odds = normalize(odds_map.get("X", 0))
-                    away_odds = normalize(odds_map.get("2", 0))
+                    home_odds = normalize(float(event.get("home_odd") or 0))
+                    draw_odds = normalize(float(event.get("neutral_odd") or 0))
+                    away_odds = normalize(float(event.get("away_odd") or 0))
 
                     if home_odds < 1.01 or away_odds < 1.01:
                         continue
@@ -119,6 +101,9 @@ class BetikaScraper(BaseScraper):
                         home_odds=home_odds,
                         away_odds=away_odds,
                         draw_odds=draw_odds if draw_odds > 1.01 else None,
+                        home_team=home,
+                        away_team=away,
+                        start_time=start_time,
                     ))
                 except Exception as e:
                     print(f"[{self.name}] Parse error on event: {e}")
